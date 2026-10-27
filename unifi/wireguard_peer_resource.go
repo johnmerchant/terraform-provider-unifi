@@ -64,10 +64,10 @@ type wireguardPeerIdentityModel struct {
 
 // wireguardPeerResourceModel describes the resource data model.
 type wireguardPeerResourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Site        types.String `tfsdk:"site"`
-	NetworkID   types.String `tfsdk:"network_id"`
-	Name        types.String `tfsdk:"name"`
+	ID            types.String `tfsdk:"id"`
+	Site          types.String `tfsdk:"site"`
+	NetworkID     types.String `tfsdk:"network_id"`
+	Name          types.String `tfsdk:"name"`
 	InterfaceIP   types.String `tfsdk:"interface_ip"`
 	InterfaceIPv6 types.String `tfsdk:"interface_ipv6"`
 	PublicKey     types.String `tfsdk:"public_key"`
@@ -591,7 +591,7 @@ func (r *wireguardPeerResource) modelToPeer(
 	model *wireguardPeerResourceModel,
 ) (*unifi.WireGuardPeer, diag.Diagnostics) {
 	peer := &unifi.WireGuardPeer{
-		Name:        model.Name.ValueString(),
+		Name:          model.Name.ValueString(),
 		InterfaceIP:   model.InterfaceIP.ValueString(),
 		InterfaceIPv6: model.InterfaceIPv6.ValueStringPointer(),
 		PublicKey:     model.PublicKey.ValueString(),
