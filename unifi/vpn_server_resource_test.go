@@ -17,6 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/querycheck"
 	"github.com/hashicorp/terraform-plugin-testing/tfversion"
 	"github.com/ubiquiti-community/go-unifi/unifi"
+	"github.com/ubiquiti-community/terraform-provider-unifi/unifi/util"
 )
 
 func TestAccVPNServer_wireguard_basic(t *testing.T) {
@@ -1223,5 +1224,115 @@ func TestAccVPNServerList_basic(t *testing.T) {
 				},
 			},
 		},
+	})
+}
+
+// The IPv6 fields as the controller holds them for a WireGuard server created
+// in the UI with "IPv6 Gateway/Subnet" and the WAN's IPv6 address (Network
+// 10.x): ipv6_subnet in gateway form, and the listening family.
+func Test_vpnServerResource_wireguardIPv6(t *testing.T) {
+	ctx := context.Background()
+	r := &vpnServerResource{}
+	readWG := func(t *testing.T, model vpnServerResourceModel) vpnServerWireguardModel {
+		t.Helper()
+		var wg vpnServerWireguardModel
+		if d := model.Wireguard.As(
+			ctx,
+			&wg,
+			struct{ UnhandledNullAsEmpty, UnhandledUnknownAsEmpty bool }{},
+		); d.HasError() {
+			t.Fatalf("reading wireguard: %v", d)
+		}
+		return wg
+	}
+
+	t.Run("read: subnet_ipv6 and ip_version from the controller", func(t *testing.T) {
+		network := &unifi.Network{
+			ID:                                     "net-v6",
+			Name:                                   util.Ptr("wg-v6"),
+			Enabled:                                true,
+			IPSubnet:                               util.Ptr("192.0.2.1/24"),
+			IPV6Subnet:                             util.Ptr("fd00:db8::1/64"),
+			VPNType:                                util.Ptr("wireguard-server"),
+			LocalPort:                              util.Ptr(int64(51821)),
+			WireguardInterfaceBindingModeIPVersion: util.Ptr("v6"),
+		}
+		var model vpnServerResourceModel
+		if d := r.networkToModel(ctx, network, &model, "default", &vpnServerResourceModel{}); d.HasError() {
+			t.Fatalf("unexpected diags: %v", d)
+		}
+		if got := model.SubnetIPv6.ValueString(); got != "fd00:db8::1/64" {
+			t.Errorf("SubnetIPv6 = %q, want fd00:db8::1/64", got)
+		}
+		if got := readWG(t, model).IPVersion.ValueString(); got != "v6" {
+			t.Errorf("IPVersion = %q, want v6", got)
+		}
+	})
+
+	t.Run("read: a server without them is IPv4 only", func(t *testing.T) {
+		network := &unifi.Network{
+			ID:        "net-v4",
+			Name:      util.Ptr("wg-v4"),
+			Enabled:   true,
+			IPSubnet:  util.Ptr("198.51.100.1/24"),
+			VPNType:   util.Ptr("wireguard-server"),
+			LocalPort: util.Ptr(int64(51820)),
+		}
+		var model vpnServerResourceModel
+		if d := r.networkToModel(ctx, network, &model, "default", &vpnServerResourceModel{}); d.HasError() {
+			t.Fatalf("unexpected diags: %v", d)
+		}
+		if !model.SubnetIPv6.IsNull() {
+			t.Errorf("SubnetIPv6 = %q, want null", model.SubnetIPv6.ValueString())
+		}
+		if got := readWG(t, model).IPVersion.ValueString(); got != "v4" {
+			t.Errorf("IPVersion = %q, want v4", got)
+		}
+	})
+
+	t.Run("write: both reach the API fields; unset leaves them off", func(t *testing.T) {
+		build := func(subnet6 cidrtypes.IPv6Prefix, ipVersion types.String) *unifi.Network {
+			t.Helper()
+			wgObj, d := types.ObjectValueFrom(ctx, vpnServerWireguardModel{}.AttributeTypes(), vpnServerWireguardModel{
+				PrivateKey: types.StringValue("WPiBa/Ak1W+8Sp8L5yvbyhHeRO2o5kJvihq2VtJ+kFg="),
+				PublicKey:  types.StringNull(),
+				Port:       types.Int64Value(51821),
+				IPVersion:  ipVersion,
+			})
+			if d.HasError() {
+				t.Fatalf("building wireguard object: %v", d)
+			}
+			got, diags := r.modelToNetwork(ctx, &vpnServerResourceModel{
+				Name:       types.StringValue("wg-v6"),
+				Enabled:    types.BoolValue(true),
+				Subnet:     cidrtypes.NewIPv4PrefixValue("192.0.2.1/24"),
+				SubnetIPv6: subnet6,
+				Wireguard:  wgObj,
+				L2TP:       types.ObjectNull(vpnServerL2TPModel{}.AttributeTypes()),
+				OpenVPN:    types.ObjectNull(vpnServerOpenVPNModel{}.AttributeTypes()),
+				DNS:        types.ObjectNull(vpnServerDNSModel{}.AttributeTypes()),
+				WAN:        types.ObjectNull(vpnServerWANModel{}.AttributeTypes()),
+			})
+			if diags.HasError() {
+				t.Fatalf("unexpected diags: %v", diags)
+			}
+			return got
+		}
+
+		got := build(cidrtypes.NewIPv6PrefixValue("fd00:db8::1/64"), types.StringValue("v6"))
+		if got.IPV6Subnet == nil || *got.IPV6Subnet != "fd00:db8::1/64" {
+			t.Errorf("IPV6Subnet = %v, want fd00:db8::1/64", got.IPV6Subnet)
+		}
+		if v := got.WireguardInterfaceBindingModeIPVersion; v == nil || *v != "v6" {
+			t.Errorf("WireguardInterfaceBindingModeIPVersion = %v, want v6", v)
+		}
+
+		got = build(cidrtypes.NewIPv6PrefixNull(), types.StringNull())
+		if got.IPV6Subnet != nil {
+			t.Errorf("IPV6Subnet = %q, want nil", *got.IPV6Subnet)
+		}
+		if v := got.WireguardInterfaceBindingModeIPVersion; v != nil {
+			t.Errorf("WireguardInterfaceBindingModeIPVersion = %q, want nil", *v)
+		}
 	})
 }
