@@ -1352,12 +1352,12 @@ func Test_vpnServerResource_wireguardPublicKey(t *testing.T) {
 	var model vpnServerResourceModel
 	if d := r.networkToModel(ctx, &unifi.Network{
 		ID:                  "net-1",
-		Name:                new("wg"),
+		Name:                util.Ptr("wg"),
 		Enabled:             true,
-		IPSubnet:            new("10.100.0.1/24"),
-		VPNType:             new("wireguard-server"),
-		WireguardPrivateKey: new(priv),
-		LocalPort:           new(int64(51820)),
+		IPSubnet:            util.Ptr("10.100.0.1/24"),
+		VPNType:             util.Ptr("wireguard-server"),
+		WireguardPrivateKey: util.Ptr(priv),
+		LocalPort:           util.Ptr(int64(51820)),
 	}, &model, "default", &vpnServerResourceModel{}); d.HasError() {
 		t.Fatalf("unexpected diags: %v", d)
 	}
